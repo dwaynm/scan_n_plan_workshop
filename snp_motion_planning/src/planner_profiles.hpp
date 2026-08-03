@@ -1,6 +1,7 @@
 #pragma once
 
 #include <thread>
+#include "level_axis_profile.h"
 #include <descartes_light/edge_evaluators/compound_edge_evaluator.h>
 #include <descartes_light/edge_evaluators/euclidean_distance_edge_evaluator.h>
 #include <tesseract_motion_planners/descartes/profile/descartes_default_plan_profile.h>
@@ -50,17 +51,52 @@ template <typename FloatType>
 typename tesseract_planning::DescartesDefaultPlanProfile<FloatType>::Ptr
 createDescartesPlanProfile(FloatType min_contact_distance,
                            const std::vector<ExplicitCollisionPair>& unique_collision_pairs,
-                           const FloatType longest_valid_segment_length)
+                           const FloatType longest_valid_segment_length, double tool_z_range = M_PI,
+                           double tool_z_resolution = 10.0 * M_PI / 180.0,
+                           const std::string& level_link = "", const Eigen::Vector3d& level_axis = { 0, 0, 1 },
+                           double level_weight = 0.0)
 {
-  auto profile = std::make_shared<tesseract_planning::DescartesDefaultPlanProfile<FloatType>>();
+  // Scoring states by how level `level_axis` is makes Descartes PREFER
+  // configurations that keep the blast fan upright, without removing the other
+  // candidates (which clamping the sample range does, and which makes waypoints
+  // with no levelled solution fail outright).
+  //
+  // Only substitute the derived profile when the feature is actually switched
+  // on: it is not registered with boost::serialization, which the task composer
+  // uses when it archives the planning problem, so using it unconditionally
+  // would break every plan ("unregistered class - derived class not registered").
+  typename tesseract_planning::DescartesDefaultPlanProfile<FloatType>::Ptr profile;
+  if (level_weight > 0.0 && !level_link.empty())
+  {
+    auto level_profile = std::make_shared<snp_motion_planning::LevelAxisDescartesPlanProfile<FloatType>>();
+    level_profile->level_link = level_link;
+    level_profile->level_axis = level_axis;
+    level_profile->level_weight = level_weight;
+    profile = level_profile;
+  }
+  else
+  {
+    profile = std::make_shared<tesseract_planning::DescartesDefaultPlanProfile<FloatType>>();
+  }
   profile->use_redundant_joint_solutions = false;
 
-  // Tool pose sampler
-  profile->target_pose_fixed = false;
+  // Tool pose sampler: how far the tool may roll about its blast axis (+Z).
+  //
+  // A full +/-pi turns that roll into free redundancy, which makes the search
+  // very robust but lets the tool pick a different roll at every waypoint. For a
+  // blast wheel that is not acceptable: media leaves the wheel tangentially, so
+  // the fan spreads in the plane perpendicular to the motor axis, and rolling
+  // the tool tips that fan over and smears coverage. Restricting the range
+  // instead keeps the fan where the tool path asks for it, at the cost of some
+  // reachability. `tool_z_range == 0` pins the roll exactly.
+  profile->target_pose_fixed = (tool_z_range <= 0.0);
   profile->target_pose_sample_axis = Eigen::Vector3d::UnitZ();
-  profile->target_pose_sample_resolution = 10.0 * M_PI / 180.0;
-  profile->target_pose_sample_min = -M_PI;
-  profile->target_pose_sample_max = M_PI - profile->target_pose_sample_resolution;
+  profile->target_pose_sample_resolution = tool_z_resolution;
+  profile->target_pose_sample_min = -tool_z_range;
+  // Full-circle sampling must drop the duplicate endpoint (+pi == -pi); a
+  // partial range keeps both ends so the tolerance is covered symmetrically.
+  profile->target_pose_sample_max =
+      (tool_z_range >= M_PI) ? (tool_z_range - tool_z_resolution) : tool_z_range;
 
   // Collision checking
   profile->allow_collision = false;

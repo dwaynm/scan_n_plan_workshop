@@ -50,7 +50,7 @@ target_link_libraries(
   yaml-cpp)
 
 # Planning server
-add_executable(${PROJECT_NAME}_node src/planning_server.cpp)
+add_executable(${PROJECT_NAME}_node src/planning_server.cpp src/level_axis_profile.cpp)
 ament_target_dependencies(${PROJECT_NAME}_node ${ROS2_DEPS})
 target_link_libraries(
   ${PROJECT_NAME}_node
@@ -70,9 +70,11 @@ target_link_libraries(
   yaml-cpp)
 
 # Plugin Library
-add_library(${PROJECT_NAME}_plugins SHARED src/plugins/kinematics/motoman_hc10_ikfast_plugin.cpp)
+add_library(${PROJECT_NAME}_plugins SHARED src/plugins/kinematics/motoman_hc10_ikfast_plugin.cpp
+                                          src/plugins/kinematics/multi_seed_inv_kin_plugin.cpp)
 target_link_libraries(${PROJECT_NAME}_plugins PUBLIC ${LAPACK_LIBRARIES} tesseract::tesseract_common
-                                                     tesseract::tesseract_kinematics_ikfast)
+                                                     tesseract::tesseract_kinematics_ikfast
+                                                     tesseract::tesseract_kinematics_kdl)
 target_include_directories(${PROJECT_NAME}_plugins SYSTEM PUBLIC ${LAPACK_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 
 # Install the executable(s)

@@ -81,6 +81,18 @@ static const std::string OMPL_MAX_PLANNING_TIME_PARAM = "ompl_max_planning_time"
 static const std::string TCP_MAX_SPEED_PARAM = "tcp_max_speed";
 static const std::string TRAJOPT_CARTESIAN_TOLERANCE_PARAM = "cartesian_tolerance";
 static const std::string TRAJOPT_CARTESIAN_COEFFICIENT_PARAM = "cartesian_coefficient";
+//   Descartes tool-roll sampling (degrees). How far the tool may roll about its
+//   own Z while Descartes searches. Full 180 = free redundancy (robust, but the
+//   roll varies per waypoint); 0 = pinned. For a blast wheel the fan must stay
+//   put, so this is normally clamped to the same tolerance TrajOpt is given.
+static const std::string DESCARTES_TOOL_Z_RANGE_PARAM = "descartes_tool_z_range_deg";
+static const std::string DESCARTES_TOOL_Z_RESOLUTION_PARAM = "descartes_tool_z_resolution_deg";
+//   Keep a tool axis horizontal (blast fan upright). Descartes scores every
+//   candidate arm configuration by how far this axis tips out of horizontal, so
+//   it prefers level ones where they exist without discarding the rest.
+static const std::string LEVEL_AXIS_LINK_PARAM = "level_axis_link";
+static const std::string LEVEL_AXIS_PARAM = "level_axis";
+static const std::string LEVEL_AXIS_WEIGHT_PARAM = "level_axis_weight";
 
 // Topics
 static const std::string ROBOT_DESCRIPTION_TOPIC = "robot_description";
@@ -266,6 +278,11 @@ public:
     declare_parameter<double>(TCP_MAX_SPEED_PARAM, 0.25);
     declare_parameter<std::vector<double>>(TRAJOPT_CARTESIAN_TOLERANCE_PARAM, { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 });
     declare_parameter<std::vector<double>>(TRAJOPT_CARTESIAN_COEFFICIENT_PARAM, { 2.5, 2.5, 2.5, 2.5, 2.5, 0.0 });
+    declare_parameter<double>(DESCARTES_TOOL_Z_RANGE_PARAM, 180.0);
+    declare_parameter<double>(DESCARTES_TOOL_Z_RESOLUTION_PARAM, 10.0);
+    declare_parameter<std::string>(LEVEL_AXIS_LINK_PARAM, "");
+    declare_parameter<std::vector<double>>(LEVEL_AXIS_PARAM, { 0.0, 0.0, 1.0 });
+    declare_parameter<double>(LEVEL_AXIS_WEIGHT_PARAM, 0.0);
 
     // Task composer
     declare_parameter(TASK_COMPOSER_CONFIG_FILE_PARAM, "");
@@ -530,9 +547,22 @@ private:
                                createTrajOptProfile(min_contact_dist, collision_pairs, longest_valid_segment_length));
 
       // Descartes
+      auto tool_z_range = get<double>(this, DESCARTES_TOOL_Z_RANGE_PARAM) * M_PI / 180.0;
+      auto tool_z_resolution = get<double>(this, DESCARTES_TOOL_Z_RESOLUTION_PARAM) * M_PI / 180.0;
+      if (tool_z_resolution <= 0.0)
+        throw std::runtime_error(DESCARTES_TOOL_Z_RESOLUTION_PARAM + " must be > 0");
+      auto level_link = get<std::string>(this, LEVEL_AXIS_LINK_PARAM);
+      auto level_weight = get<double>(this, LEVEL_AXIS_WEIGHT_PARAM);
+      auto level_axis_vec = get<std::vector<double>>(this, LEVEL_AXIS_PARAM);
+      if (level_axis_vec.size() != 3)
+        throw std::runtime_error(LEVEL_AXIS_PARAM + " must be of size 3, given " +
+                                 std::to_string(level_axis_vec.size()));
+      Eigen::Vector3d level_axis(level_axis_vec[0], level_axis_vec[1], level_axis_vec[2]);
       profile_dict->addProfile(DESCARTES_DEFAULT_NAMESPACE, PROFILE,
                                createDescartesPlanProfile<float>(static_cast<float>(min_contact_dist), collision_pairs,
-                                                                 longest_valid_segment_length));
+                                                                 longest_valid_segment_length, tool_z_range,
+                                                                 tool_z_resolution, level_link, level_axis,
+                                                                 level_weight));
       profile_dict->addProfile(DESCARTES_DEFAULT_NAMESPACE, PROFILE, createDescartesSolverProfile<float>());
 
       // Min length

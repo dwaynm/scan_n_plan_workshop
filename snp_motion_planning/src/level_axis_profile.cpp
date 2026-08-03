@@ -1,0 +1,30 @@
+#include "level_axis_profile.h"
+
+#include <boost/serialization/base_object.hpp>
+#include <boost/serialization/nvp.hpp>
+#include <boost/serialization/string.hpp>
+#include <tesseract_common/eigen_serialization.h>
+
+namespace snp_motion_planning
+{
+template <typename FloatType>
+template <class Archive>
+void LevelAxisDescartesPlanProfile<FloatType>::serialize(Archive& ar, const unsigned int /*version*/)
+{
+  ar& boost::serialization::make_nvp(
+      "base", boost::serialization::base_object<tesseract_planning::DescartesDefaultPlanProfile<FloatType>>(*this));
+  ar& BOOST_SERIALIZATION_NVP(level_link);
+  ar& BOOST_SERIALIZATION_NVP(level_axis);
+  ar& BOOST_SERIALIZATION_NVP(level_weight);
+}
+
+template class LevelAxisDescartesPlanProfile<float>;
+template class LevelAxisDescartesPlanProfile<double>;
+
+}  // namespace snp_motion_planning
+
+#include <tesseract_common/serialization.h>
+TESSERACT_SERIALIZE_ARCHIVES_INSTANTIATE(snp_motion_planning::LevelAxisDescartesPlanProfile<float>)
+TESSERACT_SERIALIZE_ARCHIVES_INSTANTIATE(snp_motion_planning::LevelAxisDescartesPlanProfile<double>)
+BOOST_CLASS_EXPORT_IMPLEMENT(snp_motion_planning::LevelAxisDescartesPlanProfile<float>)
+BOOST_CLASS_EXPORT_IMPLEMENT(snp_motion_planning::LevelAxisDescartesPlanProfile<double>)
