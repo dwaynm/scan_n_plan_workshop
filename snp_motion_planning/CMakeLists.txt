@@ -78,6 +78,15 @@ target_link_libraries(${PROJECT_NAME}_plugins PUBLIC ${LAPACK_LIBRARIES} tessera
 target_include_directories(${PROJECT_NAME}_plugins SYSTEM PUBLIC ${LAPACK_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 
 # Install the executable(s)
+# Diagnostic: ask Tesseract what is in contact at a given joint state (see
+# contact_probe.cpp -- collision-off plans level, collision-on fails, and offline
+# analysis says the states are clear).
+add_executable(contact_probe src/contact_probe.cpp)
+ament_target_dependencies(contact_probe ${ROS2_DEPS})
+target_link_libraries(contact_probe ${PROJECT_NAME}_plugins tesseract::tesseract_environment
+                      tesseract::tesseract_collision_core tesseract::tesseract_common)
+install(TARGETS contact_probe DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS ${PROJECT_NAME}_node DESTINATION lib/${PROJECT_NAME})
 
 # Install the library(ies)

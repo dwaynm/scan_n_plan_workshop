@@ -11,15 +11,20 @@ BT::NodeStatus ProgressDecoratorNode::tick()
   auto start = getBTInput<int>(this, START_PORT_KEY);
   auto end = getBTInput<int>(this, END_PORT_KEY);
 
+  // Guard against a null/dangling progress bar pointer (e.g. blackboard key not
+  // remapped into this subtree) — invokeMethod on a bad QObject* segfaults.
+  // The progress bar is purely cosmetic, so skipping the update is safe.
   // Set the initial progress
-  QMetaObject::invokeMethod(progress_bar, "setValue", Qt::QueuedConnection, Q_ARG(int, start));
+  if (progress_bar)
+    QMetaObject::invokeMethod(progress_bar, "setValue", Qt::QueuedConnection, Q_ARG(int, start));
 
   BT::NodeStatus status = child()->executeTick();
   switch (status)
   {
     case BT::NodeStatus::SUCCESS:
       // Set the final progress
-      QMetaObject::invokeMethod(progress_bar, "setValue", Qt::QueuedConnection, Q_ARG(int, end));
+      if (progress_bar)
+        QMetaObject::invokeMethod(progress_bar, "setValue", Qt::QueuedConnection, Q_ARG(int, end));
       break;
     default:
       break;
