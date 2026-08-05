@@ -3,6 +3,11 @@
 #include "plugins/tasks/kinematic_limits_check_profile.h"
 #include "plugins/tasks/tcp_speed_limiter_profile.h"
 
+#include <cstdlib>  // pulls in <features.h>, i.e. defines __GLIBC__ for the check below
+#if defined(__GLIBC__)
+#include <malloc.h>  // malloc_trim; see releaseFreedMemoryToOS below
+#endif
+
 #include <rclcpp/rclcpp.hpp>
 #include <snp_msgs/srv/generate_motion_plan.hpp>
 #include <snp_msgs/srv/generate_freespace_motion_plan.hpp>
@@ -103,6 +108,31 @@ static const std::string PLANNING_SERVICE = "generate_motion_plan";
 static const std::string FREESPACE_PLANNING_SERVICE = "generate_freespace_motion_plan";
 static const std::string REMOVE_SCAN_LINK_SERVICE = "remove_scan_link";
 static const std::string ADD_SCAN_LINK_SERVICE = "add_scan_link";
+
+/**
+ * @brief Hand the memory a finished plan freed back to the operating system.
+ *
+ * Planning a raster is a huge, short-lived allocation burst: the task composer
+ * clones the whole environment per raster segment, and every clone builds its
+ * own pair of Bullet pool allocators (~6.4 MB each), so one plan churns several
+ * GB across a dozen taskflow threads. All of it IS freed when the plan ends --
+ * measured live heap between plans is ~72 MB -- but glibc does not give it
+ * back: freeing the first large blocks raises its dynamic mmap threshold, so
+ * every later pool lands in a 64 MB per-thread arena heap, and an arena heap is
+ * only unmapped once it is COMPLETELY free. Interleaved allocation across
+ * threads means none of them ever is. The result was ~8 GB of resident memory
+ * per plan that never came back, and a machine that died on the third one.
+ *
+ * malloc_trim walks every arena and madvises the free pages away, which is what
+ * turns "freed" back into "available". Called once per plan, off the critical
+ * path -- it costs milliseconds against a 33 s plan.
+ */
+static void releaseFreedMemoryToOS()
+{
+#if defined(__GLIBC__)
+  malloc_trim(0);
+#endif
+}
 
 tesseract_common::Toolpath fromMsg(const std::vector<snp_msgs::msg::ToolPath>& paths)
 {
@@ -777,6 +807,10 @@ private:
       res->success = false;
     }
 
+    // After the plan, not inside it: everything the task composer allocated is
+    // destroyed by the time this point is reached, on the failure path too.
+    releaseFreedMemoryToOS();
+
     RCLCPP_INFO_STREAM(get_logger(), res->message);
   }
   void freespaceMotionPlanCallback(const snp_msgs::srv::GenerateFreespaceMotionPlan::Request::SharedPtr req,
@@ -829,6 +863,8 @@ private:
       res->message = ex.what();
       res->success = false;
     }
+
+    releaseFreedMemoryToOS();
 
     RCLCPP_INFO_STREAM(get_logger(), res->message);
   }
