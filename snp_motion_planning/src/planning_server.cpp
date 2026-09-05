@@ -6,6 +6,7 @@
 #include <cstdlib>  // pulls in <features.h>, i.e. defines __GLIBC__ for the check below
 #if defined(__GLIBC__)
 #include <malloc.h>  // malloc_trim; see releaseFreedMemoryToOS below
+#include <unordered_map>  // home-state seed, see robotDescriptionCallback
 #endif
 
 #include <rclcpp/rclcpp.hpp>
@@ -63,6 +64,12 @@ static const std::string SCAN_LINK_NAME = "scan";
 static const std::string SCAN_DISABLED_CONTACT_LINKS = "scan_disabled_contact_links";
 static const std::string SCAN_REDUCED_CONTACT_LINKS_PARAM = "scan_reduced_contact_links";
 static const std::string VERBOSE_PARAM = "verbose";
+// Known home joint state, used to seed the environment's start state so the
+// first plan after startup does not race the joint-state monitor (see
+// robotDescriptionCallback). Names + positions kept in sync with
+// snp_fr20/scripts/home_joint_state_publisher.py.
+static const std::string HOME_JOINT_NAMES_PARAM = "home_joint_names";
+static const std::string HOME_JOINT_POSITIONS_PARAM = "home_joint_positions";
 //   Scan link
 static const std::string COLLISION_OBJECT_TYPE_PARAM = "collision_object_type";
 static const std::string OCTREE_RESOLUTION_PARAM = "octree_resolution";
@@ -290,6 +297,8 @@ public:
     declare_parameter(VERBOSE_PARAM, false);
     declare_parameter<std::vector<std::string>>(SCAN_DISABLED_CONTACT_LINKS, std::vector<std::string>{});
     declare_parameter<std::vector<std::string>>(SCAN_REDUCED_CONTACT_LINKS_PARAM, std::vector<std::string>{});
+    declare_parameter<std::vector<std::string>>(HOME_JOINT_NAMES_PARAM, std::vector<std::string>{});
+    declare_parameter<std::vector<double>>(HOME_JOINT_POSITIONS_PARAM, std::vector<double>{});
     declare_parameter<double>(OCTREE_RESOLUTION_PARAM, 0.010);
     declare_parameter<int>(MAX_CONVEX_HULLS, 64);
     declare_parameter(COLLISION_OBJECT_TYPE_PARAM, "convex_mesh");
@@ -358,6 +367,37 @@ private:
     {
       RCLCPP_ERROR_STREAM(get_logger(), "Failed to configure environment");
       return;
+    }
+
+    // Seed the environment's current state with the known home BEFORE the state
+    // monitor starts. createProgram() reads env_->getCurrentJointValues() as the
+    // freespace start pose; on a fresh environment that is every joint at zero,
+    // which on the FR20 lays the forearm out through the workspace, so the first
+    // plan after startup aborts with 'start state is in collision'. That race is
+    // exactly what the pipeline's now-removed retry papered over. The monitor
+    // (startStateMonitor, below) still overrides this the instant a real
+    // /joint_states arrives, so live cabin runs are unaffected -- this only fixes
+    // the value read before the first message lands.
+    {
+      const auto home_names = get_parameter(HOME_JOINT_NAMES_PARAM).as_string_array();
+      const auto home_pos = get_parameter(HOME_JOINT_POSITIONS_PARAM).as_double_array();
+      if (!home_names.empty() && home_names.size() == home_pos.size())
+      {
+        std::unordered_map<std::string, double> home;
+        for (std::size_t i = 0; i < home_names.size(); ++i)
+          home[home_names[i]] = home_pos[i];
+        env_->setState(home);
+        RCLCPP_INFO_STREAM(get_logger(),
+                           "Seeded environment start state from home_joint_* parameters ("
+                               << home_names.size() << " joints).");
+      }
+      else if (!home_names.empty() || !home_pos.empty())
+      {
+        RCLCPP_WARN_STREAM(get_logger(), "home_joint_names ("
+                                             << home_names.size() << ") and home_joint_positions ("
+                                             << home_pos.size()
+                                             << ") mismatch or empty; leaving environment at its default state.");
+      }
     }
 
     // Create the plotter
